@@ -14,7 +14,7 @@
 #include <utility>
 #include <vector>
 
-namespace haki {
+namespace haki::tensor {
     template <std::floating_point T, size_t Rank> struct TensorView {
         T* data;
         std::array<size_t, Rank> shape;
@@ -89,7 +89,7 @@ namespace haki {
     }
 
     template <std::floating_point T, size_t Rank>
-    void tensor_add(const TensorView<const T, Rank> a, const TensorView<const T, Rank> b,
+    void add(const TensorView<const T, Rank> a, const TensorView<const T, Rank> b,
         const TensorView<T, Rank> out) {
         assert(a.shape == b.shape);
         assert(a.shape == out.shape);
@@ -100,7 +100,7 @@ namespace haki {
     }
 
     template <std::floating_point T, size_t Rank>
-    void tensor_scale(const TensorView<const T, Rank> a, T scalar, const TensorView<T, Rank> out) {
+    void scale(const TensorView<const T, Rank> a, T scalar, const TensorView<T, Rank> out) {
         assert(a.shape == out.shape);
 
         const size_t n = a.size();
@@ -141,62 +141,4 @@ namespace haki {
         return std::inner_product(a.data, a.data + a.size(), b.data, T { 0 });
     }
 
-    template <std::floating_point T>
-    void self_attention_head(const std::vector<ConstVectorView<T>>& embeddings,
-        ConstMatrixView<T> w_q, ConstMatrixView<T> w_k, ConstMatrixView<T> w_v,
-        std::vector<TensorView<T, 1>>& out) {
-        size_t n = embeddings.size();
-
-        // compute queries, keys, and values by multiplying each embedding with the query projection
-        // matrix
-        std::vector<Tensor<T, 1>> queries;
-        std::vector<Tensor<T, 1>> keys;
-        std::vector<Tensor<T, 1>> values;
-        queries.reserve(n);
-        keys.reserve(n);
-        values.reserve(n);
-
-        for (size_t i = 0; i < n; ++i) {
-            queries.emplace_back(std::array<size_t, 1> { w_q.shape[0] });
-            keys.emplace_back(std::array<size_t, 1> { w_k.shape[0] });
-            values.emplace_back(std::array<size_t, 1> { w_v.shape[0] });
-        }
-
-        batched_mat_vec(w_q, embeddings, queries);
-        batched_mat_vec(w_k, embeddings, keys);
-        batched_mat_vec(w_v, embeddings, values);
-
-        // compute dot product of every query, key pair
-        Tensor<T, 2> scores({ n, n });
-
-        T dim_root = std::sqrt(static_cast<T>(w_q.shape[0]));
-
-        for (size_t i = 0; i < n; ++i) {
-            for (size_t j = 0; j < n; ++j) {
-                scores.storage[i * n + j] = j > i
-                    ? -std::numeric_limits<T>::infinity()
-                    : dot(queries[i].cview(), keys[j].cview()) / dim_root;
-            }
-        }
-
-        // compute softmax of rows
-        Tensor<T, 2> weights({ n, n });
-
-        for (int i = 0; i < n; ++i) {
-            softmax(scores.cview().row(i), weights.view().row(i));
-        }
-
-        const size_t value_dim = values[0].shape[0];
-
-        Tensor<T, 1> scaled_value_vector({ value_dim });
-
-        for (int i = 0; i < n; ++i) {
-            std::fill_n(out[i].data, out[i].size(), T { 0 });
-            for (int j = 0; j < n; ++j) {
-                tensor_scale(
-                    values[j].cview(), weights.storage[i * n + j], scaled_value_vector.view());
-                tensor_add(out[i], scaled_value_vector.cview(), out[i]);
-            }
-        }
-    }
 }
