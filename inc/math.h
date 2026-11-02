@@ -20,7 +20,7 @@ namespace haki::math {
     template <std::floating_point T> T silu(T x, T beta) { return x * sigmoid(beta * x); }
 
     template <std::floating_point T>
-    T rms_norm(haki::tensor::ConstVectorView<T> x, T epsilon,
+    void rms_norm(haki::tensor::ConstVectorView<T> x, T epsilon,
         haki::tensor::ConstVectorView<T> parameters, const haki::tensor::TensorView<T, 1> out) {
         int n = out.size();
         T res = rms(x, epsilon);
