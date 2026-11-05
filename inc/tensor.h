@@ -39,7 +39,7 @@ namespace haki {
 
         explicit Tensor(std::array<size_t, Rank> dims)
             : storage(
-                  std::accumulate(dims.begin(), dims.end(), size_t { 1 }), std::multiplies<> { })
+                  std::accumulate(dims.begin(), dims.end(), size_t { 1 }, std::multiplies<> { }))
             , shape(dims) { }
 
         TensorView<T, Rank> view() { return { storage.data(), shape }; }
