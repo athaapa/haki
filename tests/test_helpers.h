@@ -16,12 +16,12 @@ void expect_close(haki::TensorView<const T, Rank> actual, haki::TensorView<const
         const T a = actual.data[i];
         const T e = expected.data[i];
         const T error = std::abs(a - e);
-        const T tolerance = atol + rtol * std::abs(error);
+        const T tolerance = atol + rtol * std::abs(e);
 
         if (!std::isfinite(a) || !std::isfinite(e) || error > tolerance) {
             std::ostringstream message;
             message << "Mismatch at flat index " << i << ": actual=" << a << ", expected=" << e
-                    << ", error=" << e << ", tolerance=" << tolerance;
+                    << ", error=" << error << ", tolerance=" << tolerance;
             throw std::runtime_error(message.str());
         }
     }

@@ -5,14 +5,14 @@ void test_rms_norm() {
     haki::Tensor<float, 1> x { { 4 } };
     haki::Tensor<float, 1> weight { { 4 } };
 
-    haki::Tensor<float, 2> expected { { 4 } };
-    haki::Tensor<float, 2> out { { 4 } };
+    haki::Tensor<float, 1> expected { { 4 } };
+    haki::Tensor<float, 1> out { { 4 } };
 
     x.storage = { 3.366903663e-01f, 1.288094074e-01f, 2.344623655e-01f, 2.303330302e-01f };
     weight.storage = { 5.000000000e-01f, 1.000000000e+00f, 1.500000000e+00f, 2.000000000e+00f };
     expected.storage = { 6.901738048e-01f, 5.280868411e-01f, 1.441856980e+00f, 1.888617516e+00f };
 
-    haki::rms_norm(x.cview(), 1e-6f, weight.cview(), weight.view());
+    haki::rms_norm(x.cview(), 1e-6f, weight.cview(), out.view());
 
     expect_close(out.cview(), expected.cview(), 1e-5f, 1e-4f);
 }

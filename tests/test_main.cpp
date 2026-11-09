@@ -1,12 +1,29 @@
 #include <exception>
 #include <iostream>
+#include <string_view>
 
+void test_attention_head_against_pytorch();
+void test_attention_head_uniform_scores();
+void test_transformer_block_against_pytorch();
+void test_transformer_block_zero_branches();
 void test_mat_mul();
 void test_mat_mul_transposed_rhs();
+void test_silu();
+void test_swiglu_mlp_against_pytorch();
+void test_swiglu_zero_gate();
+void test_multi_head_attention_against_pytorch();
+void test_multi_head_attention_causality();
 void test_rms_norm();
 void test_softmax_small();
 void test_softmax_large();
-void test_silu();
+void test_dot();
+void test_mat_vec();
+void test_add_in_place();
+void test_scale_in_place();
+void test_mul();
+void test_rotate_in_place();
+void test_rope_against_pytorch();
+void test_rope_in_place();
 
 struct Test {
     std::string_view name;
@@ -15,12 +32,28 @@ struct Test {
 
 int main() {
     const Test tests[] = {
+        { "attention_head_against_pytorch", test_attention_head_against_pytorch },
+        { "attention_head_uniform_scores", test_attention_head_uniform_scores },
+        { "transformer_block_against_pytorch", test_transformer_block_against_pytorch },
+        { "transformer_block_zero_branches", test_transformer_block_zero_branches },
         { "mat_mul", test_mat_mul },
         { "mat_mul_transposed_rhs", test_mat_mul_transposed_rhs },
+        { "silu", test_silu },
+        { "swiglu_mlp_against_pytorch", test_swiglu_mlp_against_pytorch },
+        { "swiglu_zero_gate", test_swiglu_zero_gate },
+        { "multi_head_attention_against_pytorch", test_multi_head_attention_against_pytorch },
+        { "multi_head_attention_causality", test_multi_head_attention_causality },
         { "rms_norm", test_rms_norm },
         { "softmax_small", test_softmax_small },
         { "softmax_large", test_softmax_large },
-        { "silu", test_silu },
+        { "dot", test_dot },
+        { "mat_vec", test_mat_vec },
+        { "add_in_place", test_add_in_place },
+        { "scale_in_place", test_scale_in_place },
+        { "mul", test_mul },
+        { "rotate_in_place", test_rotate_in_place },
+        { "rope_against_pytorch", test_rope_against_pytorch },
+        { "rope_in_place", test_rope_in_place },
     };
 
     int failures = 0;
