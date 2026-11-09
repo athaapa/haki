@@ -10,7 +10,8 @@ namespace haki {
 
     template <std::floating_point T> T silu(T x) { return x * sigmoid(x); }
 
-    template <std::floating_point T> void silu(ConstVectorView<T> x, const TensorView<T, 1>& out) {
+    template <std::floating_point T, size_t Rank>
+    void silu(const TensorView<const T, Rank> x, const TensorView<T, Rank>& out) {
         assert(x.shape == out.shape);
 
         std::transform(x.data, x.data + x.size(), out.data, [](T x) { return silu(x); });
@@ -47,7 +48,8 @@ namespace haki {
      * @brief element-wise matrix multiplication
      */
     template <std::floating_point T, size_t Rank>
-    void mul(TensorView<T, Rank> a, TensorView<T, Rank> b, const TensorView<T, Rank> out) {
+    void mul(
+        TensorView<const T, Rank> a, TensorView<const T, Rank> b, const TensorView<T, Rank> out) {
         assert(a.size() == b.size());
         assert(a.size() == out.size());
 
