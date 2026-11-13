@@ -32,12 +32,12 @@ void test_scale_in_place() {
     haki::scale(a.cview(), -2.0f, a.view());
     expect_close(a.cview(), expected.cview(), 1e-5f, 1e-4f);
 }
-void test_mul() {
+void test_element_mul() {
     haki::Tensor<float, 1> a({ 3 }), b({ 3 }), out({ 3 }), expected({ 3 });
     a.storage = { 1, -2, 0.5f };
     b.storage = { 3, 2, -1 };
     expected.storage = { 3, -4, -0.5f };
-    haki::mul(a.cview(), b.cview(), out.view());
+    haki::element_mul(a.cview(), b.cview(), out.view());
     expect_close(out.cview(), expected.cview(), 1e-5f, 1e-4f);
 }
 void test_rotate_in_place() {

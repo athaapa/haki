@@ -1,5 +1,5 @@
-#include "../inc/math.h"
 #include "../inc/tensor.h"
+#include "../inc/tmath.h"
 #include "test_helpers.h"
 
 void test_mat_mul() {
