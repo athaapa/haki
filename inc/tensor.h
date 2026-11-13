@@ -29,7 +29,7 @@ namespace haki {
             requires(Rank == 2)
         {
             assert(i < shape[0]);
-            return { data + i * shape[1], { shape[1] } };
+            return { data + (i * shape[1]), { shape[1] } };
         }
     };
 

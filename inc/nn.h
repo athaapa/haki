@@ -1,8 +1,8 @@
 #pragma once
 
-#include "math.h"
 #include "model.h"
 #include "tensor.h"
+#include "tmath.h"
 #include <algorithm>
 #include <cmath>
 #include <concepts>
@@ -18,10 +18,9 @@ namespace haki {
             total += (x.data[i] * x.data[i]);
         }
 
-        return std::sqrt(epsilon + total / n);
+        return std::sqrt(epsilon + (total / n));
     }
 
-    // TODO: add assertions
     template <std::floating_point T, size_t Rank>
     void rms_norm(TensorView<const T, Rank> x, T epsilon, TensorView<const T, Rank> parameters,
         const TensorView<T, Rank> out) {
@@ -33,6 +32,30 @@ namespace haki {
     }
 
     template <std::floating_point T>
+    void compute_attention_weights(ConstMatrixView<T> queries, ConstMatrixView<T> keys,
+        size_t head_dim, size_t h, size_t kv_h, const TensorView<T, 2> out) {
+        const size_t num_tokens = queries.shape[0];
+        const T dim_inv_root = T { 1 } / std::sqrt(static_cast<T>(head_dim));
+
+        for (size_t i = 0; i < num_tokens; ++i) {
+            const size_t q_offset = (i * queries.shape[1]) + (h * head_dim);
+            ConstVectorView<T> query { queries.data + q_offset, { head_dim } };
+
+            Tensor<T, 1> row_score({ num_tokens });
+            std::fill_n(
+                row_score.view().data, num_tokens, T { -std::numeric_limits<T>::infinity() });
+
+            for (size_t j = 0; j <= i; ++j) {
+                const size_t kv_offset = (j * keys.shape[1]) + (kv_h * head_dim);
+                ConstVectorView<T> key { keys.data + kv_offset, { head_dim } };
+
+                row_score.storage[j] = dot(query, key) * dim_inv_root;
+            }
+
+            softmax(row_score.cview(), out.row(i));
+        }
+    }
+    template <std::floating_point T>
     void self_attention_head(ConstMatrixView<T> q_vectors, ConstMatrixView<T> k_vectors,
         ConstMatrixView<T> v_vectors, size_t h, size_t kv_h, Qwen3Config config,
         const TensorView<T, 2> head_output) {
@@ -42,24 +65,7 @@ namespace haki {
 
         Tensor<T, 2> scores({ num_tokens, num_tokens });
 
-        for (size_t i = 0; i < num_tokens; ++i) {
-            const size_t q_offset = i * q_vectors.shape[1] + h * head_dim;
-            ConstVectorView<T> query { q_vectors.data + q_offset, { head_dim } };
-
-            Tensor<T, 1> row_score({ num_tokens });
-            std::fill_n(
-                row_score.view().data, num_tokens, T { -std::numeric_limits<T>::infinity() });
-
-            for (size_t j = 0; j <= i; ++j) {
-                // TODO: hoist q_vectors.shape[1]
-                const size_t kv_offset = j * k_vectors.shape[1] + kv_h * head_dim;
-                ConstVectorView<T> key { k_vectors.data + kv_offset, { head_dim } };
-
-                row_score.storage[j] = dot(query, key) * dim_inv_root;
-            }
-
-            softmax(row_score.cview(), scores.view().row(i));
-        }
+        compute_attention_weights(q_vectors, k_vectors, head_dim, h, kv_h, scores.view());
 
         std::fill_n(head_output.data, head_output.size(), T { 0 });
 
@@ -68,11 +74,11 @@ namespace haki {
             auto out = head_output.row(i);
 
             for (size_t j = 0; j <= i; ++j) {
-                const size_t offset = j * v_vectors.shape[1] + kv_h * head_dim;
+                const size_t offset = (j * v_vectors.shape[1]) + (kv_h * head_dim);
 
                 ConstVectorView<T> value { v_vectors.data + offset, { head_dim } };
 
-                const T weight = scores.storage[i * num_tokens + j];
+                const T weight = scores.storage[(i * num_tokens) + j];
 
                 for (size_t d = 0; d < head_dim; ++d) {
                     out.data[d] += weight * value.data[d];
@@ -89,69 +95,72 @@ namespace haki {
         const T x = a.data[0];
         const T y = a.data[1];
 
-        const T c = std::cos(theta);
-        const T s = std::sin(theta);
+        const T cos_theta = std::cos(theta);
+        const T sin_theta = std::sin(theta);
 
-        out.data[0] = c * x - s * y;
-        out.data[1] = s * x + c * y;
+        out.data[0] = (cos_theta * x) - (sin_theta * y);
+        out.data[1] = (sin_theta * x) + (cos_theta * y);
+    }
+
+    template <std::floating_point T>
+    void rotate_pairs(
+        ConstMatrixView<T> vectors, size_t head_dim, T theta, const TensorView<T, 2> out) {
+        const size_t num_tokens = vectors.shape[0];
+        const size_t num_heads = vectors.shape[1] / head_dim;
+
+        for (size_t i = 0; i < num_tokens; ++i) {
+            for (size_t h = 0; h < num_heads; ++h) {
+                const size_t offset = (i * vectors.shape[1]) + (h * head_dim);
+
+                for (size_t k = 0; k < head_dim / 2; ++k) {
+
+                    const T freq = static_cast<T>(i)
+                        * std::pow(theta, -2 * static_cast<T>(k) / static_cast<T>(head_dim));
+
+                    T pair1 = vectors.data[offset + k];
+                    T pair2 = vectors.data[offset + k + (head_dim / 2)];
+                    std::array pair { pair1, pair2 };
+
+                    TensorView<T, 1> q_pair { pair.data(), { 2 } };
+                    TensorView<const T, 1> const_q_pair { pair.data(), { 2 } };
+
+                    rotate_vector(const_q_pair, freq, q_pair);
+
+                    out.data[offset + k] = pair[0];
+                    out.data[offset + k + (head_dim / 2)] = pair[1];
+                }
+            }
+        }
     }
 
     template <std::floating_point T>
     void rope(ConstMatrixView<T> q_vectors, ConstMatrixView<T> k_vectors, Qwen3Config config,
         const TensorView<T, 2> q_out, const TensorView<T, 2> k_out) {
         const size_t num_tokens = q_vectors.shape[0];
-        const size_t num_attention_heads = config.num_attention_heads;
         const size_t head_dim = config.head_dim;
-        const size_t num_kv_heads = config.num_key_value_heads;
         const T theta = config.rope_theta;
 
-        // queries
+        rotate_pairs(q_vectors, head_dim, theta, q_out);
+        rotate_pairs(k_vectors, head_dim, theta, k_out);
+    }
+
+    template <std::floating_point T>
+    void qk_norm(const TensorView<T, 2> vectors, ConstVectorView<T> norm_weights, T rms_norm_eps) {
+        const size_t head_dim = norm_weights.size();
+        assert(head_dim > 0);
+        assert(vectors.shape[1] % head_dim == 0);
+
+        const size_t num_heads = vectors.shape[1] / head_dim;
+        const size_t num_tokens = vectors.shape[0];
+
         for (size_t i = 0; i < num_tokens; ++i) {
-            for (size_t h = 0; h < num_attention_heads; ++h) {
-                const size_t q_offset = i * q_vectors.shape[1] + h * head_dim;
+            for (size_t h = 0; h < num_heads; ++h) {
+                const size_t offset = (i * vectors.shape[1]) + (h * head_dim);
 
-                for (size_t k = 0; k < head_dim / 2; ++k) {
+                ConstVectorView<T> vector { vectors.data + offset, { head_dim } };
+                TensorView<T, 1> vector_norm { vectors.data + offset, { head_dim } };
 
-                    const T freq = static_cast<T>(i)
-                        * std::pow(theta, -2 * static_cast<T>(k) / static_cast<T>(head_dim));
-
-                    T pair1 = *(q_vectors.data + q_offset + k);
-                    T pair2 = *(q_vectors.data + q_offset + k + head_dim / 2);
-                    T pair[2] { pair1, pair2 };
-
-                    TensorView<T, 1> q_pair { pair, { 2 } };
-                    TensorView<const T, 1> const_q_pair { pair, { 2 } };
-
-                    rotate_vector(const_q_pair, freq, q_pair);
-
-                    *(q_out.data + q_offset + k) = pair[0];
-                    *(q_out.data + q_offset + k + head_dim / 2) = pair[1];
-                }
-            }
-        }
-
-        // keys
-        for (size_t i = 0; i < num_tokens; ++i) {
-            for (size_t h = 0; h < num_kv_heads; ++h) {
-                const size_t k_offset = i * k_vectors.shape[1] + h * head_dim;
-
-                for (size_t k = 0; k < head_dim / 2; ++k) {
-
-                    const T freq = static_cast<T>(i)
-                        * std::pow(theta, -2 * static_cast<T>(k) / static_cast<T>(head_dim));
-
-                    T pair1 = *(k_vectors.data + k_offset + k);
-                    T pair2 = *(k_vectors.data + k_offset + k + head_dim / 2);
-                    T pair[2] { pair1, pair2 };
-
-                    TensorView<T, 1> k_pair { pair, { 2 } };
-                    TensorView<const T, 1> const_k_pair { pair, { 2 } };
-
-                    rotate_vector(const_k_pair, freq, k_pair);
-
-                    k_out.data[k_offset + k] = pair[0];
-                    k_out.data[k_offset + k + head_dim / 2] = pair[1];
-                }
+                rms_norm(vector, rms_norm_eps, norm_weights, vector_norm);
             }
         }
     }
@@ -168,9 +177,6 @@ namespace haki {
         const size_t q_heads_size = head_dim * num_attention_heads;
         const size_t kv_heads_size = head_dim * num_kv_heads;
 
-        // get q, k, and v by multiplying embeddings by projections
-        //
-        // [num_tokens, hidden_size] * [num_attention_head * head_dim, hidden_size] (tranposed)
         Tensor<T, 2> q_vectors { { num_tokens, q_heads_size } };
         Tensor<T, 2> k_vectors { { num_tokens, kv_heads_size } };
         Tensor<T, 2> v_vectors { { num_tokens, kv_heads_size } };
@@ -178,43 +184,15 @@ namespace haki {
         mat_mul_transposed_rhs(input, weights.k_proj.cview(), k_vectors.view());
         mat_mul_transposed_rhs(input, weights.v_proj.cview(), v_vectors.view());
 
-        // QK-norm
-        // NOTE: factor this out as its own function?
-        for (size_t i = 0; i < num_tokens; ++i) {
-            for (size_t h = 0; h < num_attention_heads; ++h) {
+        T rms_norm_eps = static_cast<T>(config.rms_norm_eps);
 
-                const size_t q_offset = i * q_vectors.shape[1] + h * head_dim;
+        // TODO: In place?
+        qk_norm(q_vectors.view(), weights.q_norm.cview(), rms_norm_eps);
+        qk_norm(k_vectors.view(), weights.k_norm.cview(), rms_norm_eps);
 
-                ConstVectorView<T> q_vector { q_vectors.storage.data() + q_offset, { head_dim } };
-                TensorView<T, 1> q_vector_norm { q_vectors.storage.data() + q_offset,
-                    { head_dim } };
-
-                rms_norm(q_vector, static_cast<T>(config.rms_norm_eps), weights.q_norm.cview(),
-                    q_vector_norm);
-            }
-        }
-
-        for (size_t i = 0; i < num_tokens; ++i) {
-            for (size_t h = 0; h < num_kv_heads; ++h) {
-                const size_t k_offset = i * k_vectors.shape[1] + h * head_dim;
-
-                ConstVectorView<T> k_vector { k_vectors.storage.data() + k_offset, { head_dim } };
-                TensorView<T, 1> k_vector_norm { k_vectors.storage.data() + k_offset,
-                    { head_dim } };
-
-                rms_norm(k_vector, static_cast<T>(config.rms_norm_eps), weights.k_norm.cview(),
-                    k_vector_norm);
-            }
-        }
-
-        // apply RoPE
         rope(q_vectors.cview(), k_vectors.cview(), config, q_vectors.view(), k_vectors.view());
 
         Tensor<T, 2> attention_out { { num_tokens, num_attention_heads * head_dim } };
-
-        // split q, k, and v into views of length head_dim and run attention on each
-        // concatenate results
-        // qwen3 uses GQA so each each query shares a KV with another query
 
         for (size_t h = 0; h < num_attention_heads; ++h) {
             const size_t kv_h = h / (num_attention_heads / num_kv_heads);
@@ -224,16 +202,16 @@ namespace haki {
             self_attention_head(q_vectors.cview(), k_vectors.cview(), v_vectors.cview(), h, kv_h,
                 config, head_out.view());
 
+            // TODO: consider factoring out
             for (size_t i = 0; i < num_tokens; ++i) {
                 for (size_t j = 0; j < head_dim; ++j) {
                     attention_out.view()
-                        .data[i * (num_attention_heads * head_dim) + (h * head_dim) + j]
-                        = head_out.view().data[i * head_dim + j];
+                        .data[(i * num_attention_heads * head_dim) + (h * head_dim) + j]
+                        = head_out.view().data[(i * head_dim) + j];
                 }
             }
         }
 
-        // apply output projection
         mat_mul_transposed_rhs(attention_out.cview(), weights.o_proj.cview(), out);
     }
 
@@ -243,35 +221,28 @@ namespace haki {
         const size_t num_tokens = input.shape[0];
         const size_t intermediate_dim = weights.up_proj.shape[0];
 
-        // apply gated projection and up projection
         Tensor<T, 2> up { { num_tokens, intermediate_dim } };
         Tensor<T, 2> gate { { num_tokens, intermediate_dim } };
-
-        // [num_tokens, hidden_size] *  [intermediate_dim, hidden_size] (transposed)
 
         mat_mul_transposed_rhs(input, weights.up_proj.cview(), up.view());
         mat_mul_transposed_rhs(input, weights.gate_proj.cview(), gate.view());
 
-        // apply silu to gated projection
         silu(gate.cview(), gate.view());
 
-        // element-wise multiply gated and up
         Tensor<T, 2> hidden { { num_tokens, intermediate_dim } };
-        mul(up.cview(), gate.cview(), hidden.view());
+        element_mul(up.cview(), gate.cview(), hidden.view());
 
-        // down project
-        // [hidden_size, intermediate_dim] * [num_tokens, intermediate_dim] (transposed)
         mat_mul_transposed_rhs(hidden.cview(), weights.down_proj.cview(), out);
     }
 
     template <std::floating_point T>
-    void transformer_block(
-        const Qwen3<T>& qwen, size_t l, ConstMatrixView<T> input, const TensorView<T, 2> out) {
+    void transformer_block(const Qwen3<T>& qwen, size_t layer_num, ConstMatrixView<T> input,
+        const TensorView<T, 2> out) {
         const Qwen3Weights<T>& weights = qwen.weights;
         const Qwen3Config& config = qwen.config;
         const std::vector<Qwen3LayerWeights<T>>& layers = weights.layers;
         const T epsilon = static_cast<T>(qwen.config.rms_norm_eps);
-        const Qwen3LayerWeights<T>& layer_weights = layers[l];
+        const Qwen3LayerWeights<T>& layer_weights = layers[layer_num];
 
         Tensor<T, 2> temp { input.shape };
         Tensor<T, 2> att_res { input.shape };
