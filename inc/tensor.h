@@ -26,15 +26,20 @@ namespace haki {
             size_t stride = 1;
             for (size_t axis = Rank; axis-- > 0;) {
                 strides[axis] = stride;
+                assert(
+                    shape[axis] == 0 || stride <= std::numeric_limits<size_t>::max() / shape[axis]);
                 stride *= shape[axis];
             }
+            assert(data != nullptr || size() == 0);
         }
 
         TensorView(T* pointer, std::array<size_t, Rank> dimensions,
             std::array<size_t, Rank> element_strides)
             : data(pointer)
             , shape(dimensions)
-            , strides(element_strides) { }
+            , strides(element_strides) {
+            assert(data != nullptr || size() == 0);
+        }
 
         template <std::integral... Indices>
             requires(sizeof...(Indices) == Rank)
@@ -45,6 +50,7 @@ namespace haki {
                 assert(coordinates[axis] < shape[axis]);
                 offset += coordinates[axis] * strides[axis];
             }
+            assert(data != nullptr);
             return data[offset];
         }
 
@@ -56,6 +62,7 @@ namespace haki {
                 offset += (index % shape[axis]) * strides[axis];
                 index /= shape[axis];
             }
+            assert(data != nullptr);
             return data[offset];
         }
 
@@ -92,7 +99,7 @@ namespace haki {
 
         [[nodiscard]] size_t size() const {
             const size_t n
-                = std::accumulate(shape.begin(), shape.end(), size_t { 1 }, std::multiplies<> { });
+                = std::accumulate(shape.begin(), shape.end(), size_t { 1 }, std::multiplies<> {});
             return n;
         }
 
@@ -109,12 +116,19 @@ namespace haki {
         std::array<size_t, Rank> shape;
 
         explicit Tensor(std::array<size_t, Rank> dims)
-            : storage(
-                  std::accumulate(dims.begin(), dims.end(), size_t { 1 }, std::multiplies<> { }))
+            : storage(std::accumulate(dims.begin(), dims.end(), size_t { 1 }, std::multiplies<> {}))
             , shape(dims) { }
 
-        TensorView<T, Rank> view() { return { storage.data(), shape }; }
-        TensorView<const T, Rank> view() const { return { storage.data(), shape }; }
+        TensorView<T, Rank> view() {
+            TensorView<T, Rank> result { storage.data(), shape };
+            assert(result.size() == storage.size());
+            return result;
+        }
+        TensorView<const T, Rank> view() const {
+            TensorView<const T, Rank> result { storage.data(), shape };
+            assert(result.size() == storage.size());
+            return result;
+        }
         TensorView<const T, Rank> cview() const { return view(); }
     };
 

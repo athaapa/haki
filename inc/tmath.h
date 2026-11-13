@@ -142,13 +142,17 @@ namespace haki {
         for (size_t i = 1; i < n; ++i)
             mx = std::max(mx, a[i]);
 
+        // Masked -infinity entries are valid, but at least one score must be finite.
+        assert(std::isfinite(mx));
         for (size_t i = 0; i < n; ++i) {
+            assert(!std::isnan(a[i]));
             T p = std::exp(a[i] - mx);
 
             out[i] = p;
             sum += p;
         }
 
+        assert(std::isfinite(sum) && sum > T { 0 });
         for (size_t i = 0; i < n; ++i)
             out[i] /= sum;
     }
