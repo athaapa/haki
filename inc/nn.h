@@ -8,6 +8,8 @@
 #include <concepts>
 #include <functional>
 #include <limits>
+#include <string_view>
+#include <unordered_map>
 #include <vector>
 
 namespace haki {
@@ -154,6 +156,7 @@ namespace haki {
 
     template <std::floating_point T>
     void qk_norm(ConstMatrixView<T> vectors, ConstVectorView<T> norm_weights, T rms_norm_eps,
+
         const TensorView<T, 2> out) {
         assert(vectors.shape == out.shape);
         assert(std::isfinite(rms_norm_eps) && rms_norm_eps > T { 0 });
@@ -187,7 +190,7 @@ namespace haki {
         const size_t num_kv_heads = config.num_key_value_heads;
 
         assert(input.shape == out.shape);
-        assert(input.shape[1] == config.hidden_size && config.hidden_size > 0);
+        assert(input.shape[1] == config.hidden_dim && config.hidden_dim > 0);
         assert(head_dim > 0 && head_dim % 2 == 0);
         assert(num_attention_heads > 0 && num_kv_heads > 0);
         assert(num_attention_heads % num_kv_heads == 0);
@@ -217,7 +220,6 @@ namespace haki {
 
         T rms_norm_eps = static_cast<T>(config.rms_norm_eps);
 
-        // TODO: in place?
         qk_norm(query_heads.cview(), weights.q_norm.cview(), rms_norm_eps, query_heads.view());
         qk_norm(key_heads.cview(), weights.k_norm.cview(), rms_norm_eps, key_heads.view());
 
@@ -266,6 +268,27 @@ namespace haki {
     }
 
     template <std::floating_point T>
+    void id_to_embedding(
+        const std::vector<int>& ids, ConstMatrixView<T> embeddings, const TensorView<T, 2> out) {
+        assert(out.shape[0] == ids.size());
+        assert(out.shape[1] == embeddings.shape[1]);
+
+        const size_t hidden_dim = embeddings.shape[1];
+
+        for (size_t i = 0; i < ids.size(); ++i) {
+            assert(ids[i] >= 0);
+            assert(static_cast<size_t>(ids[i]) < embeddings.shape[0]);
+
+            const auto token_vector = embeddings.row(ids[i]);
+            const auto out_vector = out.row(i);
+
+            for (size_t j = 0; j < hidden_dim; ++j) {
+                out_vector[j] = token_vector[j];
+            }
+        }
+    }
+
+    template <std::floating_point T>
     void transformer_block(const Qwen3<T>& qwen, size_t layer_num, ConstMatrixView<T> input,
         const TensorView<T, 2> out) {
         const auto& weights = qwen.weights;
@@ -275,7 +298,7 @@ namespace haki {
         assert(layer_num < layers.size());
         assert(layer_num < config.num_hidden_layers);
         assert(input.shape == out.shape);
-        assert(input.shape[1] == config.hidden_size);
+        assert(input.shape[1] == config.hidden_dim);
         const auto& layer_weights = layers[layer_num];
         assert(layer_weights.pre_attention_norm.shape[0] == input.shape[1]);
         assert(layer_weights.pre_mlp_norm.shape[0] == input.shape[1]);
@@ -305,5 +328,33 @@ namespace haki {
 
         add(mlp_res.cview(), att_res.cview(), temp.view());
         add(input, temp.cview(), out);
+    }
+
+    template <std::floating_point T>
+    size_t generate_next_token(const Qwen3<T>& qwen, const std::vector<int>& tokens) {
+        const auto& config = qwen.config;
+        const size_t num_tokens = tokens.size();
+        const size_t hidden_dim = config.hidden_dim;
+        const size_t hidden_layers = config.num_hidden_layers;
+        const auto embeddings = qwen.weights.token_embedding.cview();
+
+        Tensor<T, 2> input { { num_tokens, hidden_dim } };
+
+        id_to_embedding(tokens, embeddings, input.view());
+
+        for (size_t layer_num = 0; layer_num < hidden_layers; ++layer_num) {
+            transformer_block(qwen, layer_num, input.cview(), input.view());
+        }
+
+        rms_norm(input.cview().row(num_tokens - 1), static_cast<T>(config.rms_norm_eps),
+            qwen.weights.final_norm.cview(), input.view().row(num_tokens - 1));
+
+        Tensor<T, 1> logits { { embeddings.shape[0] } };
+        mat_mul(embeddings, input.cview().row(num_tokens - 1), logits.view());
+
+        const auto best = std::max_element(logits.storage.begin(), logits.storage.end());
+        const auto next_token = static_cast<size_t>(std::distance(logits.storage.begin(), best));
+
+        return next_token;
     }
 }
