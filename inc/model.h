@@ -29,8 +29,8 @@ namespace haki {
     };
 
     struct Qwen3Config {
-        size_t hidden_size;
-        size_t intermediate_size;
+        size_t hidden_dim;
+        size_t intermediate_dim;
         size_t head_dim;
         size_t num_attention_heads;
         size_t num_key_value_heads;
