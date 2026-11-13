@@ -118,17 +118,16 @@ namespace haki {
                     const T freq = static_cast<T>(i)
                         * std::pow(theta, -2 * static_cast<T>(k) / static_cast<T>(head_dim));
 
-                    T pair1 = vectors[i, offset + k];
-                    T pair2 = vectors[i, offset + k + (head_dim / 2)];
-                    std::array pair { pair1, pair2 };
+                    std::array rotation_pair { vectors[i, offset + k],
+                        vectors[i, offset + k + (head_dim / 2)] };
 
-                    TensorView<T, 1> q_pair { pair.data(), { 2 } };
-                    TensorView<const T, 1> const_q_pair { pair.data(), { 2 } };
+                    TensorView<T, 1> query_pair { rotation_pair.data(), { 2 } };
+                    TensorView<const T, 1> const_query_pair { rotation_pair.data(), { 2 } };
 
-                    rotate_vector(const_q_pair, freq, q_pair);
+                    rotate_vector(const_query_pair, freq, query_pair);
 
-                    out[i, offset + k] = pair[0];
-                    out[i, offset + k + (head_dim / 2)] = pair[1];
+                    out[i, offset + k] = rotation_pair[0];
+                    out[i, offset + k + (head_dim / 2)] = rotation_pair[1];
                 }
             }
         }
