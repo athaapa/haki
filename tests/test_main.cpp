@@ -20,7 +20,7 @@ void test_dot();
 void test_mat_vec();
 void test_add_in_place();
 void test_scale_in_place();
-void test_mul();
+void test_element_mul();
 void test_rotate_in_place();
 void test_rope_against_pytorch();
 void test_rope_in_place();
@@ -50,7 +50,7 @@ int main() {
         { "mat_vec", test_mat_vec },
         { "add_in_place", test_add_in_place },
         { "scale_in_place", test_scale_in_place },
-        { "mul", test_mul },
+        { "mul", test_element_mul },
         { "rotate_in_place", test_rotate_in_place },
         { "rope_against_pytorch", test_rope_against_pytorch },
         { "rope_in_place", test_rope_in_place },
