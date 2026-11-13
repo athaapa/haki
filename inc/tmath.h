@@ -14,7 +14,9 @@ namespace haki {
     void silu(const TensorView<const T, Rank> x, const TensorView<T, Rank>& out) {
         assert(x.shape == out.shape);
 
-        std::transform(x.data, x.data + x.size(), out.data, [](T x) { return silu(x); });
+        for (size_t i = 0; i < x.size(); ++i) {
+            out.flat(i) = silu(x.flat(i));
+        }
     }
 
     /*
@@ -27,19 +29,18 @@ namespace haki {
         assert(a.shape[0] == out.shape[0]);
         assert(b.shape[1] == out.shape[1]);
 
-        int a_n = a.shape[0];
-        int b_n = b.shape[0];
+        size_t a_n = a.shape[0];
+        size_t b_n = b.shape[0];
 
-        int a_m = a.shape[1];
-        int b_m = b.shape[1];
+        size_t b_m = b.shape[1];
 
-        for (int i = 0; i < a_n; ++i) { // row
-            for (int j = 0; j < b_m; ++j) {
+        for (size_t i = 0; i < a_n; ++i) { // row
+            for (size_t j = 0; j < b_m; ++j) {
                 T sum = 0;
-                for (int k = 0; k < b_n; ++k) {
-                    sum += a.data[i * a_m + k] * b.data[k * b_m + j];
+                for (size_t k = 0; k < b_n; ++k) {
+                    sum += a[i, k] * b[k, j];
                 }
-                out.data[i * b_m + j] = sum;
+                out[i, j] = sum;
             }
         }
     }
@@ -50,10 +51,11 @@ namespace haki {
     template <std::floating_point T, size_t Rank>
     void element_mul(
         TensorView<const T, Rank> a, TensorView<const T, Rank> b, const TensorView<T, Rank> out) {
-        assert(a.size() == b.size());
-        assert(a.size() == out.size());
+        assert(a.shape == b.shape);
+        assert(a.shape == out.shape);
 
-        std::transform(a.data, a.data + a.size(), b.data, out.data, std::multiplies<T>());
+        for (size_t i = 0; i < a.size(); ++i)
+            out.flat(i) = a.flat(i) * b.flat(i);
     }
 
     /*
@@ -70,8 +72,10 @@ namespace haki {
         const size_t cols = a.shape[1];
 
         for (size_t i = 0; i < a.shape[0]; ++i) {
-            const T* row = a.data + i * cols;
-            out.data[i] = std::inner_product(row, row + cols, b.data, T { 0 });
+            T sum = 0;
+            for (size_t k = 0; k < cols; ++k)
+                sum += a[i, k] * b[k];
+            out[i] = sum;
         }
     }
 
@@ -90,7 +94,7 @@ namespace haki {
 
         for (size_t i = 0; i < a.shape[0]; ++i) {
             for (size_t j = 0; j < b.shape[0]; ++j) {
-                out.data[i * out.shape[1] + j] = dot(a.row(i), b.row(j));
+                out[i, j] = dot(a.row(i), b.row(j));
             }
         }
     }
@@ -106,7 +110,8 @@ namespace haki {
 
         const size_t n = a.size();
 
-        std::transform(a.data, a.data + n, b.data, out.data, std::plus<> { });
+        for (size_t i = 0; i < n; ++i)
+            out.flat(i) = a.flat(i) + b.flat(i);
     }
 
     /*
@@ -118,10 +123,11 @@ namespace haki {
 
         const size_t n = a.size();
 
-        std::transform(a.data, a.data + n, out.data, [scalar](T x) { return x * scalar; });
+        for (size_t i = 0; i < n; ++i)
+            out.flat(i) = a.flat(i) * scalar;
     }
 
-    // NOTE: can overflow
+    // Subtract the maximum before exponentiation.
     template <std::floating_point T>
     void softmax(ConstVectorView<T> a, const TensorView<T, 1> out) {
         assert(a.shape == out.shape);
@@ -130,21 +136,29 @@ namespace haki {
 
         T sum = 0;
 
-        T mx = *std::max_element(a.data, a.data + a.size());
+        if (n == 0)
+            return;
+        T mx = a[0];
+        for (size_t i = 1; i < n; ++i)
+            mx = std::max(mx, a[i]);
 
         for (size_t i = 0; i < n; ++i) {
-            T p = std::exp(a.data[i] - mx);
+            T p = std::exp(a[i] - mx);
 
-            out.data[i] = p;
+            out[i] = p;
             sum += p;
         }
 
         for (size_t i = 0; i < n; ++i)
-            out.data[i] /= sum;
+            out[i] /= sum;
     }
 
     template <std::floating_point T> T dot(ConstVectorView<T> a, ConstVectorView<T> b) {
-        return std::inner_product(a.data, a.data + a.size(), b.data, T { 0 });
+        assert(a.shape == b.shape);
+        T sum = 0;
+        for (size_t i = 0; i < a.size(); ++i)
+            sum += a[i] * b[i];
+        return sum;
     }
 
 }

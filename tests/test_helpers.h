@@ -13,8 +13,8 @@ void expect_close(haki::TensorView<const T, Rank> actual, haki::TensorView<const
     }
 
     for (size_t i = 0; i < actual.size(); ++i) {
-        const T a = actual.data[i];
-        const T e = expected.data[i];
+        const T a = actual.flat(i);
+        const T e = expected.flat(i);
         const T error = std::abs(a - e);
         const T tolerance = atol + rtol * std::abs(e);
 

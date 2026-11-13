@@ -15,7 +15,7 @@ namespace haki {
         T total = 0;
         size_t n = x.size();
         for (size_t i = 0; i < n; ++i) {
-            total += (x.data[i] * x.data[i]);
+            total += (x[i] * x[i]);
         }
 
         return std::sqrt(epsilon + (total / n));
@@ -27,7 +27,7 @@ namespace haki {
         size_t n = out.size();
         T res = rms(x, epsilon);
         for (size_t i = 0; i < n; ++i) {
-            out.data[i] = parameters.data[i] * (x.data[i] / res);
+            out[i] = parameters[i] * (x[i] / res);
         }
     }
 
@@ -38,16 +38,14 @@ namespace haki {
         const T dim_inv_root = T { 1 } / std::sqrt(static_cast<T>(head_dim));
 
         for (size_t i = 0; i < num_tokens; ++i) {
-            const size_t q_offset = (i * queries.shape[1]) + (h * head_dim);
-            ConstVectorView<T> query { queries.data + q_offset, { head_dim } };
+            auto query = queries.row(i).narrow(0, h * head_dim, head_dim);
 
             Tensor<T, 1> row_score({ num_tokens });
             std::fill_n(
                 row_score.view().data, num_tokens, T { -std::numeric_limits<T>::infinity() });
 
             for (size_t j = 0; j <= i; ++j) {
-                const size_t kv_offset = (j * keys.shape[1]) + (kv_h * head_dim);
-                ConstVectorView<T> key { keys.data + kv_offset, { head_dim } };
+                auto key = keys.row(j).narrow(0, kv_h * head_dim, head_dim);
 
                 row_score.storage[j] = dot(query, key) * dim_inv_root;
             }
@@ -67,21 +65,20 @@ namespace haki {
 
         compute_attention_weights(q_vectors, k_vectors, head_dim, h, kv_h, scores.view());
 
-        std::fill_n(head_output.data, head_output.size(), T { 0 });
+        for (size_t i = 0; i < head_output.size(); ++i)
+            head_output.flat(i) = T { 0 };
 
         // multiply each value vector by each attention score
         for (size_t i = 0; i < num_tokens; ++i) {
             auto out = head_output.row(i);
 
             for (size_t j = 0; j <= i; ++j) {
-                const size_t offset = (j * v_vectors.shape[1]) + (kv_h * head_dim);
-
-                ConstVectorView<T> value { v_vectors.data + offset, { head_dim } };
+                auto value = v_vectors.row(j).narrow(0, kv_h * head_dim, head_dim);
 
                 const T weight = scores.storage[(i * num_tokens) + j];
 
                 for (size_t d = 0; d < head_dim; ++d) {
-                    out.data[d] += weight * value.data[d];
+                    out[d] += weight * value[d];
                 }
             }
         }
@@ -92,14 +89,14 @@ namespace haki {
         assert(a.size() == 2);
         assert(out.size() == 2);
 
-        const T x = a.data[0];
-        const T y = a.data[1];
+        const T x = a[0];
+        const T y = a[1];
 
         const T cos_theta = std::cos(theta);
         const T sin_theta = std::sin(theta);
 
-        out.data[0] = (cos_theta * x) - (sin_theta * y);
-        out.data[1] = (sin_theta * x) + (cos_theta * y);
+        out[0] = (cos_theta * x) - (sin_theta * y);
+        out[1] = (sin_theta * x) + (cos_theta * y);
     }
 
     template <std::floating_point T>
@@ -110,15 +107,15 @@ namespace haki {
 
         for (size_t i = 0; i < num_tokens; ++i) {
             for (size_t h = 0; h < num_heads; ++h) {
-                const size_t offset = (i * vectors.shape[1]) + (h * head_dim);
+                const size_t offset = h * head_dim;
 
                 for (size_t k = 0; k < head_dim / 2; ++k) {
 
                     const T freq = static_cast<T>(i)
                         * std::pow(theta, -2 * static_cast<T>(k) / static_cast<T>(head_dim));
 
-                    T pair1 = vectors.data[offset + k];
-                    T pair2 = vectors.data[offset + k + (head_dim / 2)];
+                    T pair1 = vectors[i, offset + k];
+                    T pair2 = vectors[i, offset + k + (head_dim / 2)];
                     std::array pair { pair1, pair2 };
 
                     TensorView<T, 1> q_pair { pair.data(), { 2 } };
@@ -126,8 +123,8 @@ namespace haki {
 
                     rotate_vector(const_q_pair, freq, q_pair);
 
-                    out.data[offset + k] = pair[0];
-                    out.data[offset + k + (head_dim / 2)] = pair[1];
+                    out[i, offset + k] = pair[0];
+                    out[i, offset + k + (head_dim / 2)] = pair[1];
                 }
             }
         }
@@ -155,10 +152,10 @@ namespace haki {
 
         for (size_t i = 0; i < num_tokens; ++i) {
             for (size_t h = 0; h < num_heads; ++h) {
-                const size_t offset = (i * vectors.shape[1]) + (h * head_dim);
+                const size_t offset = h * head_dim;
 
-                ConstVectorView<T> vector { vectors.data + offset, { head_dim } };
-                TensorView<T, 1> vector_norm { vectors.data + offset, { head_dim } };
+                auto vector_norm = vectors.row(i).narrow(0, offset, head_dim);
+                auto vector = vector_norm.cview();
 
                 rms_norm(vector, rms_norm_eps, norm_weights, vector_norm);
             }
@@ -197,19 +194,9 @@ namespace haki {
         for (size_t h = 0; h < num_attention_heads; ++h) {
             const size_t kv_h = h / (num_attention_heads / num_kv_heads);
 
-            Tensor<T, 2> head_out { { num_tokens, head_dim } };
-
-            self_attention_head(q_vectors.cview(), k_vectors.cview(), v_vectors.cview(), h, kv_h,
-                config, head_out.view());
-
-            // TODO: consider factoring out
-            for (size_t i = 0; i < num_tokens; ++i) {
-                for (size_t j = 0; j < head_dim; ++j) {
-                    attention_out.view()
-                        .data[(i * num_attention_heads * head_dim) + (h * head_dim) + j]
-                        = head_out.view().data[(i * head_dim) + j];
-                }
-            }
+            auto head_out = attention_out.view().narrow(1, h * head_dim, head_dim);
+            self_attention_head(
+                q_vectors.cview(), k_vectors.cview(), v_vectors.cview(), h, kv_h, config, head_out);
         }
 
         mat_mul_transposed_rhs(attention_out.cview(), weights.o_proj.cview(), out);
@@ -248,7 +235,9 @@ namespace haki {
         Tensor<T, 2> att_res { input.shape };
         Tensor<T, 2> mlp_res { input.shape };
 
-        std::copy_n(input.data, input.size(), temp.view().data);
+        for (size_t i = 0; i < input.size(); ++i) {
+            temp.view().flat(i) = input.flat(i);
+        }
 
         for (size_t i = 0; i < out.shape[0]; ++i) {
             rms_norm(input.row(i), epsilon, layer_weights.pre_attention_norm.cview(),

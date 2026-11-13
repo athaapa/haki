@@ -1,4 +1,5 @@
-#include "../inc/haki.h"
+#include "../inc/nn.h"
+#include "../inc/tensor.h"
 
 void test_softmax() {
     haki::Tensor<double, 1> logits({ 3 });

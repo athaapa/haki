@@ -18,8 +18,79 @@ namespace haki {
     template <std::floating_point T, size_t Rank> struct TensorView {
         T* data;
         std::array<size_t, Rank> shape;
+        std::array<size_t, Rank> strides;
 
-        size_t size() const {
+        TensorView(T* pointer, std::array<size_t, Rank> dimensions)
+            : data(pointer)
+            , shape(dimensions) {
+            size_t stride = 1;
+            for (size_t axis = Rank; axis-- > 0;) {
+                strides[axis] = stride;
+                stride *= shape[axis];
+            }
+        }
+
+        TensorView(T* pointer, std::array<size_t, Rank> dimensions,
+            std::array<size_t, Rank> element_strides)
+            : data(pointer)
+            , shape(dimensions)
+            , strides(element_strides) { }
+
+        template <std::integral... Indices>
+            requires(sizeof...(Indices) == Rank)
+        T& operator[](Indices... indices) const {
+            const std::array<size_t, Rank> coordinates { static_cast<size_t>(indices)... };
+            size_t offset = 0;
+            for (size_t axis = 0; axis < Rank; ++axis) {
+                assert(coordinates[axis] < shape[axis]);
+                offset += coordinates[axis] * strides[axis];
+            }
+            return data[offset];
+        }
+
+        // Logical row-major traversal, including noncontiguous views.
+        T& flat(size_t index) const {
+            assert(index < size());
+            size_t offset = 0;
+            for (size_t axis = Rank; axis-- > 0;) {
+                offset += (index % shape[axis]) * strides[axis];
+                index /= shape[axis];
+            }
+            return data[offset];
+        }
+
+        [[nodiscard]] bool is_contiguous() const {
+            if (size() == 0) {
+                return true;
+            }
+            size_t expected = 1;
+            for (size_t axis = Rank; axis-- > 0;) {
+                if (shape[axis] > 1 && strides[axis] != expected) {
+                    return false;
+                }
+                expected *= shape[axis];
+            }
+            return true;
+        }
+
+        TensorView narrow(size_t axis, size_t start, size_t length) const {
+            assert(axis < Rank);
+            assert(start <= shape[axis]);
+            assert(length <= shape[axis] - start);
+            auto result = *this;
+            result.shape[axis] = length;
+            // Empty views need no pointer adjustment (possibly beyond one-past).
+            if (result.size() != 0) {
+                result.data += start * strides[axis];
+            }
+            return result;
+        }
+
+        TensorView<const std::remove_const_t<T>, Rank> cview() const {
+            return { data, shape, strides };
+        }
+
+        [[nodiscard]] size_t size() const {
             const size_t n
                 = std::accumulate(shape.begin(), shape.end(), size_t { 1 }, std::multiplies<> { });
             return n;
@@ -29,7 +100,7 @@ namespace haki {
             requires(Rank == 2)
         {
             assert(i < shape[0]);
-            return { data + (i * shape[1]), { shape[1] } };
+            return { shape[1] == 0 ? data : data + (i * strides[0]), { shape[1] }, { strides[1] } };
         }
     };
 
