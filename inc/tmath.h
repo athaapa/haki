@@ -48,7 +48,7 @@ namespace haki {
      * @brief element-wise matrix multiplication
      */
     template <std::floating_point T, size_t Rank>
-    void mul(
+    void element_mul(
         TensorView<const T, Rank> a, TensorView<const T, Rank> b, const TensorView<T, Rank> out) {
         assert(a.size() == b.size());
         assert(a.size() == out.size());
