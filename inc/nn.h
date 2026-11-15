@@ -331,7 +331,8 @@ namespace haki {
     }
 
     template <std::floating_point T>
-    size_t generate_next_token(const Qwen3<T>& qwen, const std::vector<int>& tokens) {
+    void compute_logits(
+        const Qwen3<T>& qwen, const std::vector<int>& tokens, const TensorView<T, 1> out) {
         const auto& config = qwen.config;
         const size_t num_tokens = tokens.size();
         const size_t hidden_dim = config.hidden_dim;
@@ -349,12 +350,7 @@ namespace haki {
         rms_norm(input.cview().row(num_tokens - 1), static_cast<T>(config.rms_norm_eps),
             qwen.weights.final_norm.cview(), input.view().row(num_tokens - 1));
 
-        Tensor<T, 1> logits { { embeddings.shape[0] } };
-        mat_mul(embeddings, input.cview().row(num_tokens - 1), logits.view());
-
-        const auto best = std::max_element(logits.storage.begin(), logits.storage.end());
-        const auto next_token = static_cast<size_t>(std::distance(logits.storage.begin(), best));
-
-        return next_token;
+        // Tensor<T, 1> logits { { embeddings.shape[0] } };
+        mat_mul(embeddings, input.cview().row(num_tokens - 1), out);
     }
 }
