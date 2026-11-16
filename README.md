@@ -1,29 +1,34 @@
 # haki
 
-## Differential tests
+haki is a C++23 implementation of the Qwen3-0.6B forward pass on CPU. It takes token IDs as input and computes next-token logits.
 
-Run from the repository root with a C++23 compiler and a Python virtual environment.
+## Build
+
+From the repository root:
+
+```sh
+mkdir -p build
+clang++ -std=c++23 -O3 src/main.cpp -o build/haki
+```
+
+## Run the tests
+
+With a Python virtual environment active, compare the forward pass against PyTorch on one seeded input.
 
 ```sh
 python -m pip install -r tests/requirements.txt
-python -m pytest tests -q
+python -m pytest tests -q --component compute_logits --trials 1
 ```
 
-Before running any tests, pytest builds haki and its C++ test driver using
-`clang++` (override with `CXX`). A build failure stops the session and prints the
-compiler diagnostic. Each test generates CPU float32 tensors and weights from its seed and sends
-their exact bytes to the driver. PyTorch computes the reference from the same tensors.
-The default suite runs seeds 0–99 independently for each component. To replay or
-customize a run:
+## Prefill benchmark
+
+On macOS with Homebrew’s `llama.cpp` installed, compare haki and llama.cpp on a 32-token prompt using the same Qwen3-0.6B weights.
 
 ```sh
-python -m pytest tests -q --component multi_head --seed 17 --trials 1
-python -m pytest tests -q --component block --trials 50 --atol 1e-5 --rtol 1e-4
+./bench/run_prefill.py 32
 ```
 
-Every element must satisfy `abs(actual - expected) <= atol + rtol * abs(expected)`.
-The defaults are `atol=1e-5` and `rtol=1e-4`. Either side being NaN or infinite
-fails the comparison. The logits test compares every vocabulary entry. Failures identify the output
-coordinate with the largest tolerance overrun. The summary reports the mean,
-median, and maximum of each trial's largest absolute error, grouped by component.
-Use `--sanitize` to run the driver with AddressSanitizer and UndefinedBehaviorSanitizer.
+## Next steps
+
+- Add a per-layer KV cache and check that decoding one token at a time produces the same logits, within tolerance, as a full forward pass.
+- Compare decode throughput and combined prefill and decode time against llama.cpp.
