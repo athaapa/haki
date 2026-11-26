@@ -1,0 +1,5 @@
+.venv/
+__pycache__/
+.clang-tidy
+.clang-format
+.clangd
