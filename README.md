@@ -13,11 +13,10 @@ clang++ -std=c++23 -O3 src/main.cpp -o build/haki
 
 ## Run the tests
 
-With a Python virtual environment active, compare the forward pass against PyTorch on one seeded input.
+With [uv](https://docs.astral.sh/uv/) installed, compare the forward pass against PyTorch on one seeded input:
 
 ```sh
-python -m pip install -r tests/requirements.txt
-python -m pytest tests -q --component compute_logits --trials 1
+uv run pytest tests -q --component compute_logits --trials 1
 ```
 
 ## Next steps
