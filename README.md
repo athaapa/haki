@@ -20,14 +20,6 @@ python -m pip install -r tests/requirements.txt
 python -m pytest tests -q --component compute_logits --trials 1
 ```
 
-## Prefill benchmark
-
-On macOS with Homebrew’s `llama.cpp` installed, compare haki and llama.cpp on a 32-token prompt using the same Qwen3-0.6B weights.
-
-```sh
-./bench/run_prefill.py 32
-```
-
 ## Next steps
 
 - Add a per-layer KV cache and check that decoding one token at a time produces the same logits, within tolerance, as a full forward pass.
