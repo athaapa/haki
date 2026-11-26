@@ -1,6 +1,7 @@
 // One invocation runs one case. Tensor records contain Rank uint32 extents and
 // contiguous float32 data, both in host byte order (the runner is local).
 #include "nn.h"
+#include "session.h"
 #include <cstdint>
 #include <iostream>
 #include <map>
@@ -236,7 +237,7 @@ void run_mlp(const Qwen3Config& /*unused*/) {
     emit(out);
 }
 
-void run_block(const Qwen3Config& config) {
+void run_transformer_block(const Qwen3Config& config) {
     auto x = read_tensor<2>();
     auto out = destination<2>(x.shape);
     auto layer = read_layer();
@@ -256,8 +257,7 @@ void run_embedding(const Qwen3Config& config) {
     emit(out);
 }
 
-void run_compute_logits(const Qwen3Config& config) {
-    auto ids = read_ids();
+Qwen3<float> read_model(const Qwen3Config& config) {
     auto embedding = read_tensor<2>();
     std::vector<Qwen3LayerWeights<float>> layers;
     layers.reserve(config.num_hidden_layers);
@@ -268,8 +268,52 @@ void run_compute_logits(const Qwen3Config& config) {
         .weights = { .token_embedding = std::move(embedding),
             .layers = std::move(layers),
             .final_norm = read_tensor<1>() } };
+    return model;
+}
+
+void run_compute_logits(const Qwen3Config& config) {
+    auto ids = read_ids();
+    auto model = read_model(config);
     auto logits = destination<1>({ model.weights.token_embedding.shape[0] });
     compute_logits(model, ids, logits.view());
+    emit(logits);
+}
+
+void run_cached_logits(const Qwen3Config& config) {
+    auto ids = read_ids();
+    const auto model = read_model(config);
+    const auto vocab = model.weights.token_embedding.shape[0];
+    InferenceSession<float> session(model, ids.size());
+
+    // Verify every intermediate prefix, then reuse the exact-capacity cache.
+    for (size_t chunk_size : { size_t { 1 }, size_t { 2 } }) {
+        session.reset();
+        if (session.size() != 0)
+            throw std::runtime_error("reset did not clear the cache length");
+        auto outputs = destination<2>({ (ids.size() + chunk_size - 1) / chunk_size, vocab });
+        for (size_t start = 0; start < ids.size(); start += chunk_size) {
+            const size_t count = std::min(chunk_size, ids.size() - start);
+            auto tokens = std::span<const int>(ids).subspan(start, count);
+            auto out = outputs.view().row(start / chunk_size);
+            session.compute_logits(tokens, out);
+            if (session.size() != start + count)
+                throw std::runtime_error("incorrect cache length after chunk");
+        }
+        emit(outputs);
+    }
+
+    auto logits = destination<1>({ vocab });
+    auto out = logits.view();
+    auto tokens = std::span<const int>(ids);
+    session.reset();
+    session.compute_logits(tokens, out);
+    emit(logits);
+
+    session.reset();
+    std::reverse(ids.begin(), ids.end());
+    session.compute_logits(tokens, out);
+    if (session.size() != ids.size())
+        throw std::runtime_error("incorrect cache length after reset and reuse");
     emit(logits);
 }
 
@@ -295,9 +339,10 @@ const std::map<std::string, Handler> handlers {
     { "rope", run_rope },
     { "multi_head", run_multi_head },
     { "mlp", run_mlp },
-    { "block", run_block },
+    { "transformer_block", run_transformer_block },
     { "embedding", run_embedding },
     { "compute_logits", run_compute_logits },
+    { "cached_logits", run_cached_logits },
 };
 
 int main(int argc, char** argv) {

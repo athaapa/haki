@@ -37,7 +37,7 @@ class Trial:
         head_dim = rng.choice((2, 4, 6, 8))
         kv_heads = rng.randint(1, 3)
         heads = kv_heads * rng.randint(1, 4)
-        layers = rng.randint(1, 3) if component == "compute_logits" else 1
+        layers = rng.randint(1, 3) if component in ("compute_logits", "cached_logits") else 1
         self.config = Config(hidden, intermediate, head_dim, heads, kv_heads, layers,
                              rng.choice((1e-6, 1e-5, 1e-4)), rng.choice((100., 10000., 1e6)))
         self.inputs = {}
@@ -172,7 +172,7 @@ def mlp(trial):
     return ref.mlp(x, weights)
 
 
-def block(trial):
+def transformer_block(trial):
     x = trial.draw("x", trial.tokens, trial.config.hidden)
     weights = trial.layer_weights()
     if trial.zero_weights:
@@ -239,10 +239,34 @@ def compute_logits(trial):
     return F.linear(final, table)
 
 
+def cached_logits(trial):
+    ids, table = token_inputs(trial)
+    c = trial.config
+    layers = [trial.layer_weights(f"layer{i}.") for i in range(c.layers)]
+    norm = trial.draw("final_norm", c.hidden)
+
+    def full_prefix(tokens):
+        x = F.embedding(tokens, table)
+        for weights in layers:
+            x = ref.block(x, weights, c)
+        return F.linear(ref.rms_norm(x[-1], norm, c.epsilon), table)
+
+    prefixes = torch.stack([full_prefix(ids[:end]) for end in range(1, len(ids) + 1)])
+    chunk_ends = list(range(2, len(ids) + 1, 2))
+    if len(ids) % 2:
+        chunk_ends.append(len(ids))
+    return {
+        "single_token_steps": prefixes,
+        "two_token_chunks": prefixes[[end - 1 for end in chunk_ends]],
+        "full_prefill": prefixes[-1],
+        "reset_new_sequence": full_prefix(ids.flip(0)),
+    }
+
+
 COMPONENTS = {fn.__name__: fn for fn in (
     sigmoid, softmax, dot, rms, rms_norm, rotate_vector, silu, add, element_mul,
-    scale, mat_vec, mat_mul, mat_mul_transposed_rhs, multi_head, mlp, block,
-    rotate_pairs, rope, qk_norm, attention_weights, attention_head, embedding, compute_logits,
+    scale, mat_vec, mat_mul, mat_mul_transposed_rhs, multi_head, mlp, transformer_block,
+    rotate_pairs, rope, qk_norm, attention_weights, attention_head, embedding, compute_logits, cached_logits,
 )}
 
 
